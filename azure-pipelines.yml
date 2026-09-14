@@ -101,3 +101,16 @@ steps:
       throw "Failed to extract source files."
     }
   displayName: 'Transfer source files to Ubuntu'
+- powershell: |
+    $keyPath = Join-Path $env:USERPROFILE ".ssh\digitalclock_pipeline"
+    $remoteDir = "/home/hazrul/pipeline-builds/mydigitalclock/$env:BUILD_BUILDID"
+    $imageTag = "hazrulfitri/mydigitalclock:$env:BUILD_BUILDID"
+
+    ssh -i "$keyPath" -p 2222 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 hazrul@127.0.0.1 "docker build -t '$imageTag' '$remoteDir'"
+
+    if ($LASTEXITCODE -ne 0) {
+      throw "Docker image build failed."
+    }
+
+    Write-Host "Built image: $imageTag"
+  displayName: 'Build Docker image in Ubuntu'

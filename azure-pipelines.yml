@@ -1,0 +1,31 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger: none
+pr: none
+
+pool:
+  name: DigitalClockPool
+  demands:
+    - Agent.Name -equals digitalclock-windows
+
+steps:
+- checkout: none
+
+- powershell: |
+    $keyPath = Join-Path $env:USERPROFILE ".ssh\digitalclock_pipeline"
+
+    if (-not (Test-Path $keyPath)) {
+      throw "SSH key not found for the Windows agent account."
+    }
+
+    ssh -i "$keyPath" -p 2222 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 hazrul@127.0.0.1 "whoami"
+
+    if ($LASTEXITCODE -ne 0) {
+      throw "SSH connection to Ubuntu failed."
+    }
+  displayName: 'Check SSH connection to Ubuntu'
+
+

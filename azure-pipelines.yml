@@ -32,3 +32,13 @@ steps:
       throw "Docker access check failed."
     }
   displayName: 'Check Docker access in Ubuntu'
+
+- powershell: |
+    $keyPath = Join-Path $env:USERPROFILE ".ssh\digitalclock_pipeline"
+
+    ssh -i "$keyPath" -p 2222 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 hazrul@127.0.0.1 "minikube kubectl -- wait --for=condition=Ready node/minikube --timeout=60s"
+
+    if ($LASTEXITCODE -ne 0) {
+      throw "Kubernetes readiness check failed."
+    }
+  displayName: 'Check Kubernetes readiness in Ubuntu'

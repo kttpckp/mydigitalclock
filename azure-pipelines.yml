@@ -8,6 +8,29 @@ pool:
 
 steps:
 - checkout: self
+- powershell: |
+    $sourcePath = $env:BUILD_SOURCESDIRECTORY
+    Write-Host "Source folder: $sourcePath"
+
+    Get-ChildItem -Path $sourcePath
+
+    $requiredFiles = @(
+      "Dockerfile",
+      "index.html",
+      "style.css",
+      "script.js",
+      "k8s/deployment.yaml",
+      "k8s/service.yaml"
+    )
+
+    foreach ($file in $requiredFiles) {
+      if (-not (Test-Path (Join-Path $sourcePath $file) -PathType Leaf)) {
+        throw "Required file missing: $file"
+      }
+    }
+
+    Write-Host "All required project files are present."
+  displayName: 'Verify checked-out project files'
 
 - powershell: |
     $keyPath = Join-Path $env:USERPROFILE ".ssh\digitalclock_pipeline"

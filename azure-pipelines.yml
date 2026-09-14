@@ -65,3 +65,39 @@ steps:
       throw "Kubernetes readiness check failed."
     }
   displayName: 'Check Kubernetes readiness in Ubuntu'
+- powershell: |
+    $ErrorActionPreference = "Stop"
+
+    $keyPath = Join-Path $env:USERPROFILE ".ssh\digitalclock_pipeline"
+    $archive = Join-Path $env:AGENT_TEMPDIRECTORY "digitalclock-source.tar.gz"
+    $remoteTarget = "hazrul@127.0.0.1"
+    $remoteDir = "/home/hazrul/pipeline-builds/mydigitalclock/$env:BUILD_BUILDID"
+
+    $connectionOptions = @(
+      "-i", $keyPath,
+      "-o", "BatchMode=yes",
+      "-o", "IdentitiesOnly=yes",
+      "-o", "StrictHostKeyChecking=yes",
+      "-o", "ConnectTimeout=15"
+    )
+
+    tar -czf "$archive" -C "$env:BUILD_SOURCESDIRECTORY" Dockerfile index.html style.css script.js k8s
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to package source files."
+    }
+
+    ssh @connectionOptions -p 2222 $remoteTarget "mkdir -p '$remoteDir'"
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to create Ubuntu build folder."
+    }
+
+    scp @connectionOptions -P 2222 "$archive" "${remoteTarget}:$remoteDir/source.tar.gz"
+    if ($LASTEXITCODE -ne 0) {
+      throw "Source transfer failed."
+    }
+
+    ssh @connectionOptions -p 2222 $remoteTarget "tar -xzf '$remoteDir/source.tar.gz' -C '$remoteDir' && ls -la '$remoteDir'"
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to extract source files."
+    }
+  displayName: 'Transfer source files to Ubuntu'

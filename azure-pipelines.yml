@@ -7,7 +7,7 @@ pool:
     - Agent.Name -equals digitalclock-windows
 
 steps:
-- checkout: none
+- checkout: self
 
 - powershell: |
     $keyPath = Join-Path $env:USERPROFILE ".ssh\digitalclock_pipeline"

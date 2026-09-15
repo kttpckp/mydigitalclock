@@ -121,10 +121,15 @@ steps:
     if ([string]::IsNullOrWhiteSpace($env:DOCKERHUB_TOKEN)) {
       throw "Docker Hub token is missing."
     }
+     $token = $env:DOCKERHUB_TOKEN.Trim()
+
+    if ($token.StartsWith('$(')) {
+      throw "Azure DevOps did not resolve the secret variable."
+    }
 
     $remoteCommand = 'set -eu; auth_dir=$(mktemp -d); trap ''rm -f "$auth_dir/config.json"; rmdir "$auth_dir"'' EXIT; docker --config "$auth_dir" login --username hazrulfitri --password-stdin; docker --config "$auth_dir" push ' + $imageTag
 
-    $env:DOCKERHUB_TOKEN | ssh -i "$keyPath" -p 2222 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 hazrul@127.0.0.1 $remoteCommand
+      $token | ssh -i "$keyPath" -p 2222 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 hazrul@127.0.0.1 $remoteCommand
 
     if ($LASTEXITCODE -ne 0) {
       throw "Docker Hub login or image push failed."

@@ -11,6 +11,7 @@ steps:
 
 - powershell: |
     $ErrorActionPreference = "Stop"
+        [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
     $keyPath = Join-Path $env:USERPROFILE ".ssh\digitalclock_pipeline"
     $testText = "digitalclock-transfer-test-123"
     $bytes = [Text.Encoding]::UTF8.GetBytes($testText)

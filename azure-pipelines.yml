@@ -11,29 +11,26 @@ steps:
 
 - powershell: |
     $ErrorActionPreference = "Stop"
-        [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
-    $keyPath = Join-Path $env:USERPROFILE ".ssh\digitalclock_pipeline"
-    $testText = "digitalclock-transfer-test-123"
-    $bytes = [Text.Encoding]::UTF8.GetBytes($testText)
+    [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
 
-    $sha = [Security.Cryptography.SHA256]::Create()
-    try {
-      $expected = [BitConverter]::ToString(
-        $sha.ComputeHash($bytes)
-      ).Replace("-", "").ToLowerInvariant()
+    $keyPath = Join-Path $env:USERPROFILE ".ssh\digitalclock_pipeline"
+
+    if ([string]::IsNullOrWhiteSpace($env:DOCKERHUB_TOKEN)) {
+      throw "Docker Hub token is missing."
     }
-    finally {
-      $sha.Dispose()
+
+    $token = $env:DOCKERHUB_TOKEN.Trim()
+    if ($token.StartsWith('$(')) {
+      throw "Azure DevOps did not resolve the secret variable."
     }
+
+    $remoteCommand = 'set -eu; umask 077; auth_dir=$(mktemp -d); trap ''rm -f $auth_dir/config.json; rmdir $auth_dir'' EXIT; docker --config $auth_dir login --username hazrulfitri --password-stdin'
 
     $start = New-Object System.Diagnostics.ProcessStartInfo
     $start.FileName = (Get-Command ssh.exe -CommandType Application | Select-Object -First 1).Source
     $start.UseShellExecute = $false
     $start.RedirectStandardInput = $true
-    $start.RedirectStandardOutput = $true
-    $start.Arguments = '-i "{0}" -p 2222 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 hazrul@127.0.0.1 sha256sum' -f $keyPath
-
-    Write-Host "SSH executable: $($start.FileName)"
+    $start.Arguments = '-i "{0}" -p 2222 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 hazrul@127.0.0.1 "{1}"' -f $keyPath, $remoteCommand
 
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $start
@@ -41,30 +38,23 @@ steps:
     try {
       [void]$process.Start()
 
+      $bytes = [Text.Encoding]::UTF8.GetBytes($token)
       $stream = $process.StandardInput.BaseStream
       $stream.Write($bytes, 0, $bytes.Length)
       $stream.Flush()
       $stream.Close()
 
-      $output = $process.StandardOutput.ReadToEnd()
       $process.WaitForExit()
 
       if ($process.ExitCode -ne 0) {
-        throw "SSH diagnostic failed."
+        throw "Docker Hub login failed."
       }
 
-      $received = ($output.Trim() -split '\s+')[0]
-
-      Write-Host "Expected fingerprint: $expected"
-      Write-Host "Received fingerprint: $received"
-
-      if ($received -ne $expected) {
-        throw "FAIL: Received bytes differ."
-      }
-
-      Write-Host "PASS: Ubuntu received the exact test bytes."
+      Write-Host "PASS: Docker Hub login succeeded through Azure."
     }
     finally {
       $process.Dispose()
     }
-  displayName: 'Test direct input through SSH'
+  displayName: 'Verify Docker Hub login'
+  env:
+    DOCKERHUB_TOKEN: $(DOCKERHUB_TOKEN_TEST)

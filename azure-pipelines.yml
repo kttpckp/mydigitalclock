@@ -138,4 +138,4 @@ steps:
     Write-Host "Pushed image: $imageTag"
   displayName: 'Push Docker image to private Docker Hub'
   env:
-    DOCKERHUB_TOKEN: $(DOCKERHUB_TOKEN)
+    DOCKERHUB_TOKEN: $(DOCKERHUB_TOKEN_TEST)

@@ -115,44 +115,29 @@ steps:
     Write-Host "Built image: $imageTag"
   displayName: 'Build Docker image in Ubuntu'
 - powershell: |
+    $ErrorActionPreference = "Stop"
     $keyPath = Join-Path $env:USERPROFILE ".ssh\digitalclock_pipeline"
     $imageTag = "hazrulfitri/mydigitalclock:$env:BUILD_BUILDID"
 
     if ([string]::IsNullOrWhiteSpace($env:DOCKERHUB_TOKEN)) {
       throw "Docker Hub token is missing."
     }
-     $token = $env:DOCKERHUB_TOKEN.Trim()
-       $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $fingerprint = [BitConverter]::ToString(
-            $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($token))
-        ).Replace("-", "")
-        Write-Host "Token fingerprint: $fingerprint"
-    }
-    finally {
-        $sha.Dispose()
-    }
+
+    $token = $env:DOCKERHUB_TOKEN.Trim()
 
     if ($token.StartsWith('$(')) {
       throw "Azure DevOps did not resolve the secret variable."
     }
-     $probeCommand = 'python3 -c ''import sys, hashlib; data = sys.stdin.buffer.read().rstrip(bytes([13, 10])); print(hashlib.sha256(data).hexdigest().upper())'''
 
-    Write-Host "Token fingerprint received inside Ubuntu:"
-
-    $token | ssh -i "$keyPath" -p 2222 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 hazrul@127.0.0.1 $probeCommand
-
-    if ($LASTEXITCODE -ne 0) {
-      throw "Token transfer diagnostic failed."
-    }
-    $remoteCommand = 'set -eu; auth_dir=$(mktemp -d); trap ''rm -f "$auth_dir/config.json"; rmdir "$auth_dir"'' EXIT; docker --config "$auth_dir" login --username hazrulfitri --password-stdin; docker --config "$auth_dir" push ' + $imageTag
-
-       Write-Host "SSH input encoding: $($OutputEncoding.WebName)"
-    Write-Host "Encoding prefix bytes: $($OutputEncoding.GetPreamble().Length)"
-
+    $encodedToken = [Convert]::ToBase64String(
+      [Text.Encoding]::UTF8.GetBytes($token)
+    )
     $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
-    $token | ssh -i "$keyPath" -p 2222 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 hazrul@127.0.0.1 $remoteCommand
+    $remoteCommand = 'set -eu; auth_dir=$(mktemp -d); trap ''rm -f "$auth_dir/config.json"; rmdir "$auth_dir"'' EXIT; tr -d ''\r\n'' | base64 --decode | docker --config "$auth_dir" login --username hazrulfitri --password-stdin; docker --config "$auth_dir" push ' + $imageTag
+
+    $encodedToken | ssh -i "$keyPath" -p 2222 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 hazrul@127.0.0.1 $remoteCommand
+
     if ($LASTEXITCODE -ne 0) {
       throw "Docker Hub login or image push failed."
     }

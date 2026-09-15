@@ -164,3 +164,30 @@ steps:
   displayName: 'Push Docker image to private Docker Hub'
   env:
     DOCKERHUB_TOKEN: $(DOCKERHUB_TOKEN_TEST)
+- powershell: |
+    $ErrorActionPreference = "Stop"
+    $keyPath = Join-Path $env:USERPROFILE ".ssh\digitalclock_pipeline"
+    $remoteDir = "/home/hazrul/pipeline-builds/mydigitalclock/$env:BUILD_BUILDID"
+    $imageTag = "hazrulfitri/mydigitalclock:$env:BUILD_BUILDID"
+
+    $commands = @(
+      "set -eu",
+      "cd '$remoteDir'",
+      "minikube kubectl -- -n default get secret dockerhub-credentials",
+      "minikube kubectl -- set image --local -f k8s/deployment.yaml digitalclock='$imageTag' -o yaml > deployment.rendered.yaml",
+      "minikube kubectl -- -n default apply -f k8s/service.yaml",
+      "minikube kubectl -- -n default apply -f deployment.rendered.yaml",
+      "minikube kubectl -- -n default rollout status deployment/digitalclock --timeout=180s",
+      "minikube kubectl -- -n default get pods -l app=digitalclock -o wide"
+    )
+
+    $remoteCommand = $commands -join "; "
+
+    ssh -i "$keyPath" -p 2222 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 hazrul@127.0.0.1 $remoteCommand
+
+    if ($LASTEXITCODE -ne 0) {
+      throw "Kubernetes deployment or rollout failed."
+    }
+
+    Write-Host "Deployed image: $imageTag"
+  displayName: 'Deploy to Minikube and verify rollout'

@@ -7,13 +7,119 @@ pool:
     - Agent.Name -equals digitalclock-windows
 
 steps:
-- checkout: none
+- checkout: self
+- powershell: |
+    $sourcePath = $env:BUILD_SOURCESDIRECTORY
+    Write-Host "Source folder: $sourcePath"
 
+    Get-ChildItem -Path $sourcePath
+
+    $requiredFiles = @(
+      "Dockerfile",
+      "index.html",
+      "style.css",
+      "script.js",
+      "k8s/deployment.yaml",
+      "k8s/service.yaml"
+    )
+
+    foreach ($file in $requiredFiles) {
+      if (-not (Test-Path (Join-Path $sourcePath $file) -PathType Leaf)) {
+        throw "Required file missing: $file"
+      }
+    }
+
+    Write-Host "All required project files are present."
+  displayName: 'Verify checked-out project files'
+
+- powershell: |
+    $keyPath = Join-Path $env:USERPROFILE ".ssh\digitalclock_pipeline"
+
+    if (-not (Test-Path $keyPath)) {
+      throw "SSH key not found for the Windows agent account."
+    }
+
+    ssh -i "$keyPath" -p 2222 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 hazrul@127.0.0.1 "whoami"
+
+    if ($LASTEXITCODE -ne 0) {
+      throw "SSH connection to Ubuntu failed."
+    }
+  displayName: 'Check SSH connection to Ubuntu'
+
+- powershell: |
+    $keyPath = Join-Path $env:USERPROFILE ".ssh\digitalclock_pipeline"
+
+    ssh -i "$keyPath" -p 2222 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 hazrul@127.0.0.1 "docker info --format '{{.ServerVersion}}'"
+
+    if ($LASTEXITCODE -ne 0) {
+      throw "Docker access check failed."
+    }
+  displayName: 'Check Docker access in Ubuntu'
+
+- powershell: |
+    $keyPath = Join-Path $env:USERPROFILE ".ssh\digitalclock_pipeline"
+
+    ssh -i "$keyPath" -p 2222 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 hazrul@127.0.0.1 "minikube kubectl -- wait --for=condition=Ready node/minikube --timeout=60s"
+
+    if ($LASTEXITCODE -ne 0) {
+      throw "Kubernetes readiness check failed."
+    }
+  displayName: 'Check Kubernetes readiness in Ubuntu'
+- powershell: |
+    $ErrorActionPreference = "Stop"
+
+    $keyPath = Join-Path $env:USERPROFILE ".ssh\digitalclock_pipeline"
+    $archive = Join-Path $env:AGENT_TEMPDIRECTORY "digitalclock-source.tar.gz"
+    $remoteTarget = "hazrul@127.0.0.1"
+    $remoteDir = "/home/hazrul/pipeline-builds/mydigitalclock/$env:BUILD_BUILDID"
+
+    $connectionOptions = @(
+      "-i", $keyPath,
+      "-o", "BatchMode=yes",
+      "-o", "IdentitiesOnly=yes",
+      "-o", "StrictHostKeyChecking=yes",
+      "-o", "ConnectTimeout=15"
+    )
+
+    tar -czf "$archive" -C "$env:BUILD_SOURCESDIRECTORY" Dockerfile index.html style.css script.js k8s
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to package source files."
+    }
+
+    ssh @connectionOptions -p 2222 $remoteTarget "mkdir -p '$remoteDir'"
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to create Ubuntu build folder."
+    }
+
+    scp @connectionOptions -P 2222 "$archive" "${remoteTarget}:$remoteDir/source.tar.gz"
+    if ($LASTEXITCODE -ne 0) {
+      throw "Source transfer failed."
+    }
+
+    ssh @connectionOptions -p 2222 $remoteTarget "tar -xzf '$remoteDir/source.tar.gz' -C '$remoteDir' && ls -la '$remoteDir'"
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to extract source files."
+    }
+  displayName: 'Transfer source files to Ubuntu'
+- powershell: |
+    $keyPath = Join-Path $env:USERPROFILE ".ssh\digitalclock_pipeline"
+    $remoteDir = "/home/hazrul/pipeline-builds/mydigitalclock/$env:BUILD_BUILDID"
+    $imageTag = "hazrulfitri/mydigitalclock:$env:BUILD_BUILDID"
+
+    ssh -i "$keyPath" -p 2222 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 hazrul@127.0.0.1 "docker build -t '$imageTag' '$remoteDir'"
+
+    if ($LASTEXITCODE -ne 0) {
+      throw "Docker image build failed."
+    }
+
+    Write-Host "Built image: $imageTag"
+  displayName: 'Build Docker image in Ubuntu'
 - powershell: |
     $ErrorActionPreference = "Stop"
     [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
 
     $keyPath = Join-Path $env:USERPROFILE ".ssh\digitalclock_pipeline"
+    $imageTag = "hazrulfitri/mydigitalclock:$env:BUILD_BUILDID"
 
     if ([string]::IsNullOrWhiteSpace($env:DOCKERHUB_TOKEN)) {
       throw "Docker Hub token is missing."
@@ -24,7 +130,7 @@ steps:
       throw "Azure DevOps did not resolve the secret variable."
     }
 
-    $remoteCommand = 'set -eu; umask 077; auth_dir=$(mktemp -d); trap ''rm -f $auth_dir/config.json; rmdir $auth_dir'' EXIT; docker --config $auth_dir login --username hazrulfitri --password-stdin'
+    $remoteCommand = 'set -eu; umask 077; auth_dir=$(mktemp -d); trap ''rm -f $auth_dir/config.json; rmdir $auth_dir'' EXIT; docker --config $auth_dir login --username hazrulfitri --password-stdin; docker --config $auth_dir push ' + $imageTag
 
     $start = New-Object System.Diagnostics.ProcessStartInfo
     $start.FileName = (Get-Command ssh.exe -CommandType Application | Select-Object -First 1).Source
@@ -47,14 +153,14 @@ steps:
       $process.WaitForExit()
 
       if ($process.ExitCode -ne 0) {
-        throw "Docker Hub login failed."
+        throw "Docker Hub login or image push failed."
       }
 
-      Write-Host "PASS: Docker Hub login succeeded through Azure."
+      Write-Host "Pushed image: $imageTag"
     }
     finally {
       $process.Dispose()
     }
-  displayName: 'Verify Docker Hub login'
+  displayName: 'Push Docker image to private Docker Hub'
   env:
     DOCKERHUB_TOKEN: $(DOCKERHUB_TOKEN_TEST)
